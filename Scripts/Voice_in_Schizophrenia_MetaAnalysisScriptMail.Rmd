@@ -1,0 +1,516 @@
+---
+title: "Meta-Analysis of vocal patterns in schizophrenia_mail_script"
+author: "RF & AP"
+date: "04 gennaio 2019"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Load data and library
+
+```{r cars}
+
+# Clean up the R environment
+
+rm(list=ls())
+
+# Load the necessary packages. If not present, it installs them.
+
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse,readxl,boot,corrr,igraph,ggraph,tidygraph,janitor,lmer,ggplot2)
+
+
+#setwd('C:/Users/albin/Dropbox/Voice in Schizophrenia - A metaanalysis/TABELLE')
+
+
+## Load the data
+Mail_data <- as.data.frame(read_excel("4_Table_For_Mail_Analysis.xlsx"))
+
+
+
+```
+
+
+
+```{r}
+
+# Calculate statistics on authors' contact availability, propensity to respond to e-mail requesting data, and self-reported barriers 
+
+
+Mail_sent <- length(which(Mail_data$Mail_sent == "YES"))
+Mail_not_found <- length(which(Mail_data$Mail_sent == "NOT FOUND"))
+
+Answer_yes <-  length(which(Mail_data$Answer == "YES"))
+Answer_no <- length(which(Mail_data$Answer == "NO"))
+
+Total_answer <- Answer_yes +  Answer_no
+Answer_yes_percentage <- Answer_yes/Total_answer 
+Answer_no_percentage <- Answer_no/Total_answer
+
+Data_provided <- length(which(Mail_data$Data_sent == "YES"))
+Data_not_provided <- length(which(Mail_data$Data_sent  == "NO"))
+Total_data_required <- Data_provided + Data_not_provided
+Data_provided_percentage <-  Data_provided/Total_data_required
+Data_not_provided_percentage <- Data_not_provided/Total_data_required
+
+
+Data_not_available <- length(which(Mail_data$Data_not_sent_motivation_code == 1))
+Effort_required <- length(which(Mail_data$Data_not_sent_motivation_code == 2))
+Ethical_reasons <- length(which(Mail_data$Data_not_sent_motivation_code == 3))
+
+Data_not_available_percentage <- Data_not_available/Data_not_provided
+Effort_required_percentage <-  Effort_required/Data_not_provided
+Ethical_reasons_percentage <-   Ethical_reasons/Data_not_provided
+
+
+
+
+#Calculate stats on e-mails for 5-year intervals since 1960 to 2020
+
+
+# E-mail availability: e-mail found, and e-mail not found or not working
+
+Mail_sent_1965 <-  length(which(Mail_data['Year_publication'] < 1966 & Mail_data['Mail_sent']== "YES")=="YES")
+
+Mail_not_found_1965 <-  length(which(Mail_data['Year_publication'] < 1966 & Mail_data['Mail_sent']== "NOT FOUND")=="YES")
+
+Mail_sent_1966_1970 <-  length(which(Mail_data['Year_publication'] >= 1966 & Mail_data['Year_publication'] <= 1970 & Mail_data['Mail_sent']== "YES")=="YES")
+
+Mail_not_found_1966_1970 <-  length(which(Mail_data['Year_publication'] >= 1966 & Mail_data['Year_publication'] <= 1970 & Mail_data['Mail_sent']== "NOT FOUND")=="YES")
+
+Mail_sent_1971_1975 <-  length(which(Mail_data['Year_publication'] >= 1971 & Mail_data['Year_publication'] <= 1975 & Mail_data['Mail_sent']== "YES")=="YES")
+
+Mail_not_found_1971_1975 <-  length(which(Mail_data['Year_publication'] >= 1971 & Mail_data['Year_publication'] <= 1975 & Mail_data['Mail_sent']== "NOT FOUND")=="YES")
+
+Mail_sent_1976_1980 <-  length(which(Mail_data['Year_publication'] >= 1976 & Mail_data['Year_publication'] <= 1980 & Mail_data['Mail_sent']== "YES")=="YES")
+
+Mail_not_found_1976_1980 <-  length(which(Mail_data['Year_publication'] >= 1976 & Mail_data['Year_publication'] <= 1980 & Mail_data['Mail_sent']== "NOT FOUND")=="YES")
+
+Mail_sent_1981_1985 <-  length(which(Mail_data['Year_publication'] >= 1981 & Mail_data['Year_publication'] <= 1985 & Mail_data['Mail_sent']== "YES")=="YES")
+
+Mail_not_found_1981_1985 <-  length(which(Mail_data['Year_publication'] >= 1981 & Mail_data['Year_publication'] <= 1985 & Mail_data['Mail_sent']== "NOT FOUND")=="YES")
+
+Mail_sent_1986_1990 <-  length(which(Mail_data['Year_publication'] >= 1986 & Mail_data['Year_publication'] <= 1990 & Mail_data['Mail_sent']== "YES")=="YES")
+
+Mail_not_found_1986_1990 <-  length(which(Mail_data['Year_publication'] >= 1986 & Mail_data['Year_publication'] <= 1990 & Mail_data['Mail_sent']== "NOT FOUND")=="YES")
+
+Mail_sent_1991_1995 <-  length(which(Mail_data['Year_publication'] >= 1991 & Mail_data['Year_publication'] <= 1995 & Mail_data['Mail_sent']== "YES")=="YES")
+
+Mail_not_found_1991_1995 <-  length(which(Mail_data['Year_publication'] >= 1991 & Mail_data['Year_publication'] <= 1995 & Mail_data['Mail_sent']== "NOT FOUND")=="YES")
+
+Mail_sent_1996_2000 <-  length(which(Mail_data['Year_publication'] >= 1996 & Mail_data['Year_publication'] <= 2000 & Mail_data['Mail_sent']== "YES")=="YES")
+
+Mail_not_found_1996_2000 <-  length(which(Mail_data['Year_publication'] >= 1996 & Mail_data['Year_publication'] <= 2000 & Mail_data['Mail_sent']== "NOT FOUND")=="YES")
+
+Mail_sent_2001_2005 <-  length(which(Mail_data['Year_publication'] >= 2001 & Mail_data['Year_publication'] <= 2005 & Mail_data['Mail_sent']== "YES")=="YES")
+
+Mail_not_found_2001_2005 <-  length(which(Mail_data['Year_publication'] >= 2001 & Mail_data['Year_publication'] <= 2005 & Mail_data['Mail_sent']== "NOT FOUND")=="YES")
+
+Mail_sent_2006_2010 <-  length(which(Mail_data['Year_publication'] >= 2006 & Mail_data['Year_publication'] <= 2010 & Mail_data['Mail_sent']== "YES")=="YES")
+
+Mail_not_found_2006_2010 <-  length(which(Mail_data['Year_publication'] >= 2006 & Mail_data['Year_publication'] <= 2010 & Mail_data['Mail_sent']== "NOT FOUND")=="YES")
+
+Mail_sent_2011_2015 <-  length(which(Mail_data['Year_publication'] >= 2011 & Mail_data['Year_publication'] <= 2015 & Mail_data['Mail_sent']== "YES")=="YES")
+
+Mail_not_found_2011_2015 <-  length(which(Mail_data['Year_publication'] >= 2011 & Mail_data['Year_publication'] <= 2015 & Mail_data['Mail_sent']== "NOT FOUND")=="YES")
+
+Mail_sent_2016_2020 <-  length(which(Mail_data['Year_publication'] >= 2016 & Mail_data['Year_publication'] <= 2020 & Mail_data['Mail_sent']== "YES")=="YES")
+
+Mail_not_found_2016_2020 <-  length(which(Mail_data['Year_publication'] >= 2016 & Mail_data['Year_publication'] <= 2020 & Mail_data['Mail_sent']== "NOT FOUND")=="YES")
+
+
+
+# Propensity of authors to answer to our e-mail
+
+
+answer_yes_1965 <-  length(which(Mail_data['Year_publication'] < 1966 & Mail_data['Answer']== "YES")=="YES")
+
+answer_no_1965 <-  length(which(Mail_data['Year_publication'] < 1966 & Mail_data['Answer']== "NO")=="YES")
+
+answer_yes_1966_1970 <-  length(which(Mail_data['Year_publication'] >= 1966 & Mail_data['Year_publication'] <= 1970 & Mail_data['Answer']== "YES")=="YES")
+
+answer_no_1966_1970 <-  length(which(Mail_data['Year_publication'] >= 1966 & Mail_data['Year_publication'] <= 1970 & Mail_data['Answer']== "NO")=="YES")
+
+answer_yes_1971_1975 <-  length(which(Mail_data['Year_publication'] >= 1971 & Mail_data['Year_publication'] <= 1975 & Mail_data['Answer']== "YES")=="YES")
+
+answer_no_1971_1975 <-  length(which(Mail_data['Year_publication'] >= 1971 & Mail_data['Year_publication'] <= 1975 & Mail_data['Answer']== "NO")=="YES")
+
+answer_yes_1976_1980 <-  length(which(Mail_data['Year_publication'] >= 1976 & Mail_data['Year_publication'] <= 1980 & Mail_data['Answer']== "YES")=="YES")
+
+answer_no_1976_1980 <-  length(which(Mail_data['Year_publication'] >= 1976 & Mail_data['Year_publication'] <= 1980 & Mail_data['Answer']== "NO")=="YES")
+
+answer_yes_1981_1985 <-  length(which(Mail_data['Year_publication'] >= 1981 & Mail_data['Year_publication'] <= 1985 & Mail_data['Answer']== "YES")=="YES")
+
+answer_no_1981_1985 <-  length(which(Mail_data['Year_publication'] >= 1981 & Mail_data['Year_publication'] <= 1985 & Mail_data['Answer']== "NO")=="YES")
+
+answer_yes_1986_1990 <-  length(which(Mail_data['Year_publication'] >= 1986 & Mail_data['Year_publication'] <= 1990 & Mail_data['Answer']== "YES")=="YES")
+
+answer_no_1986_1990 <-  length(which(Mail_data['Year_publication'] >= 1986 & Mail_data['Year_publication'] <= 1990 & Mail_data['Answer']== "NO")=="YES")
+
+answer_yes_1991_1995 <-  length(which(Mail_data['Year_publication'] >= 1991 & Mail_data['Year_publication'] <= 1995 & Mail_data['Answer']== "YES")=="YES")
+
+answer_no_1991_1995 <-  length(which(Mail_data['Year_publication'] >= 1991 & Mail_data['Year_publication'] <= 1995 & Mail_data['Answer']== "NO")=="YES")
+
+answer_yes_1996_2000 <-  length(which(Mail_data['Year_publication'] >= 1996 & Mail_data['Year_publication'] <= 2000 & Mail_data['Answer']== "YES")=="YES")
+
+answer_no_1996_2000 <-  length(which(Mail_data['Year_publication'] >= 1996 & Mail_data['Year_publication'] <= 2000 & Mail_data['Answer']== "NO")=="YES")
+
+answer_yes_2001_2005 <-  length(which(Mail_data['Year_publication'] >= 2001 & Mail_data['Year_publication'] <= 2005 & Mail_data['Answer']== "YES")=="YES")
+
+answer_no_2001_2005 <-  length(which(Mail_data['Year_publication'] >= 2001 & Mail_data['Year_publication'] <= 2005 & Mail_data['Answer']== "NO")=="YES")
+
+answer_yes_2006_2010 <-  length(which(Mail_data['Year_publication'] >= 2006 & Mail_data['Year_publication'] <= 2010 & Mail_data['Answer']== "YES")=="YES")
+
+answer_no_2006_2010 <-  length(which(Mail_data['Year_publication'] >= 2006 & Mail_data['Year_publication'] <= 2010 & Mail_data['Answer']== "NO")=="YES")
+
+answer_yes_2011_2015 <-  length(which(Mail_data['Year_publication'] >= 2011 & Mail_data['Year_publication'] <= 2015 & Mail_data['Answer']== "YES")=="YES")
+
+answer_no_2011_2015 <-  length(which(Mail_data['Year_publication'] >= 2011 & Mail_data['Year_publication'] <= 2015 & Mail_data['Answer']== "NO")=="YES")
+
+answer_yes_2016_2020 <-  length(which(Mail_data['Year_publication'] >= 2016 & Mail_data['Year_publication'] <= 2020 & Mail_data['Answer']== "YES")=="YES")
+
+answer_no_2016_2020 <-  length(which(Mail_data['Year_publication'] >= 2016 & Mail_data['Year_publication'] <= 2020 & Mail_data['Answer']== "NO")=="YES")
+
+
+# Propensity of authors to provide at least some of the requested data
+
+Data_provided_yes_1965 <-  length(which(Mail_data['Year_publication'] < 1966 & Mail_data['Data_sent']== "YES")=="YES")
+
+Data_provided_no_1965 <-  length(which(Mail_data['Year_publication'] < 1966 & Mail_data['Data_sent']== "NO")=="YES")
+
+Data_provided_yes_1966_1970 <-  length(which(Mail_data['Year_publication'] >= 1966 & Mail_data['Year_publication'] <= 1970 & Mail_data['Data_sent']== "YES")=="YES")
+
+Data_provided_no_1966_1970 <-  length(which(Mail_data['Year_publication'] >= 1966 & Mail_data['Year_publication'] <= 1970 & Mail_data['Data_sent']== "NO")=="YES")
+
+Data_provided_yes_1971_1975 <-  length(which(Mail_data['Year_publication'] >= 1971 & Mail_data['Year_publication'] <= 1975 & Mail_data['Data_sent']== "YES")=="YES")
+
+Data_provided_no_1971_1975 <-  length(which(Mail_data['Year_publication'] >= 1971 & Mail_data['Year_publication'] <= 1975 & Mail_data['Data_sent']== "NO")=="YES")
+
+Data_provided_yes_1976_1980 <-  length(which(Mail_data['Year_publication'] >= 1976 & Mail_data['Year_publication'] <= 1980 & Mail_data['Data_sent']== "YES")=="YES")
+
+Data_provided_no_1976_1980 <-  length(which(Mail_data['Year_publication'] >= 1976 & Mail_data['Year_publication'] <= 1980 & Mail_data['Data_sent']== "NO")=="YES")
+
+Data_provided_yes_1981_1985 <-  length(which(Mail_data['Year_publication'] >= 1981 & Mail_data['Year_publication'] <= 1985 & Mail_data['Data_sent']== "YES")=="YES")
+
+Data_provided_no_1981_1985 <-  length(which(Mail_data['Year_publication'] >= 1981 & Mail_data['Year_publication'] <= 1985 & Mail_data['Data_sent']== "NO")=="YES")
+
+Data_provided_yes_1986_1990 <-  length(which(Mail_data['Year_publication'] >= 1986 & Mail_data['Year_publication'] <= 1990 & Mail_data['Data_sent']== "YES")=="YES")
+
+Data_provided_no_1986_1990 <-  length(which(Mail_data['Year_publication'] >= 1986 & Mail_data['Year_publication'] <= 1990 & Mail_data['Data_sent']== "NO")=="YES")
+
+Data_provided_yes_1991_1995 <-  length(which(Mail_data['Year_publication'] >= 1991 & Mail_data['Year_publication'] <= 1995 & Mail_data['Data_sent']== "YES")=="YES")
+
+Data_provided_no_1991_1995 <-  length(which(Mail_data['Year_publication'] >= 1991 & Mail_data['Year_publication'] <= 1995 & Mail_data['Data_sent']== "NO")=="YES")
+
+Data_provided_yes_1996_2000 <-  length(which(Mail_data['Year_publication'] >= 1996 & Mail_data['Year_publication'] <= 2000 & Mail_data['Data_sent']== "YES")=="YES")
+
+Data_provided_no_1996_2000 <-  length(which(Mail_data['Year_publication'] >= 1996 & Mail_data['Year_publication'] <= 2000 & Mail_data['Data_sent']== "NO")=="YES")
+
+Data_provided_yes_2001_2005 <-  length(which(Mail_data['Year_publication'] >= 2001 & Mail_data['Year_publication'] <= 2005 & Mail_data['Data_sent']== "YES")=="YES")
+
+Data_provided_no_2001_2005 <-  length(which(Mail_data['Year_publication'] >= 2001 & Mail_data['Year_publication'] <= 2005 & Mail_data['Data_sent']== "NO")=="YES")
+
+Data_provided_yes_2006_2010 <-  length(which(Mail_data['Year_publication'] >= 2006 & Mail_data['Year_publication'] <= 2010 & Mail_data['Data_sent']== "YES")=="YES")
+
+Data_provided_no_2006_2010 <-  length(which(Mail_data['Year_publication'] >= 2006 & Mail_data['Year_publication'] <= 2010 & Mail_data['Data_sent']== "NO")=="YES")
+
+Data_provided_yes_2011_2015 <-  length(which(Mail_data['Year_publication'] >= 2011 & Mail_data['Year_publication'] <= 2015 & Mail_data['Data_sent']== "YES")=="YES")
+
+Data_provided_no_2011_2015 <-  length(which(Mail_data['Year_publication'] >= 2011 & Mail_data['Year_publication'] <= 2015 & Mail_data['Data_sent']== "NO")=="YES")
+
+Data_provided_yes_2016_2020 <-  length(which(Mail_data['Year_publication'] >= 2016 & Mail_data['Year_publication'] <= 2020 & Mail_data['Data_sent']== "YES")=="YES")
+
+Data_provided_no_2016_2020 <-  length(which(Mail_data['Year_publication'] >= 2016 & Mail_data['Year_publication'] <= 2020 & Mail_data['Data_sent']== "NO")=="YES")
+
+# Motivations for not providing data
+
+
+NOT_FOUND_1965 <-  length(which(Mail_data['Year_publication'] < 1966 & Mail_data['Data_not_sent_motivation_code']== "1")=="YES")
+
+TOO_EFFORT_1965 <-  length(which(Mail_data['Year_publication'] < 1966 & Mail_data['Data_sent']== "2")=="YES")
+
+SKEPTICISM_1965 <- 0
+
+
+NOT_FOUND_1966_1970 <-  length(which(Mail_data['Year_publication'] >= 1966 & Mail_data['Year_publication'] <= 1970 & Mail_data['Data_not_sent_motivation_code']== "1")=="YES")
+
+TOO_EFFORT_1966_1970 <-  length(which(Mail_data['Year_publication'] >= 1966 & Mail_data['Year_publication'] <= 1970 & Mail_data['Data_not_sent_motivation_code']== "2")=="YES")
+
+SKEPTICISM_1966_1970 <- 0
+
+
+NOT_FOUND_1971_1975 <-  length(which(Mail_data['Year_publication'] >= 1971 & Mail_data['Year_publication'] <= 1975 & Mail_data['Data_not_sent_motivation_code']== "1")=="YES")
+
+TOO_EFFORT_1971_1975 <-  length(which(Mail_data['Year_publication'] >= 1971 & Mail_data['Year_publication'] <= 1975 & Mail_data['Data_not_sent_motivation_code']== "2")=="YES")
+
+SKEPTICISM_1971_1975 <- 0
+
+NOT_FOUND_1976_1980 <-  length(which(Mail_data['Year_publication'] >= 1976 & Mail_data['Year_publication'] <= 1980 & Mail_data['Data_not_sent_motivation_code']== "1")=="YES")
+
+TOO_EFFORT_1976_1980 <-  length(which(Mail_data['Year_publication'] >= 1976 & Mail_data['Year_publication'] <= 1980 & Mail_data['Data_not_sent_motivation_code']== "2")=="YES")
+
+SKEPTICISM_1976_1980 <- 0
+
+NOT_FOUND_1981_1985 <-  length(which(Mail_data['Year_publication'] >= 1981 & Mail_data['Year_publication'] <= 1985 & Mail_data['Data_not_sent_motivation_code']== "1")=="YES")
+
+TOO_EFFORT_1981_1985 <-  length(which(Mail_data['Year_publication'] >= 1981 & Mail_data['Year_publication'] <= 1985 & Mail_data['Data_not_sent_motivation_code']== "2")=="YES")
+
+SKEPTICISM_1981_1985 <- 0
+
+NOT_FOUND_1986_1990 <-  length(which(Mail_data['Year_publication'] >= 1986 & Mail_data['Year_publication'] <= 1990 & Mail_data['Data_not_sent_motivation_code']== "1")=="YES")
+
+TOO_EFFORT_1986_1990 <-  length(which(Mail_data['Year_publication'] >= 1986 & Mail_data['Year_publication'] <= 1990 & Mail_data['Data_not_sent_motivation_code']== "2")=="YES")
+
+SKEPTICISM_1986_1990 <- 0
+
+NOT_FOUND_1991_1995 <-  length(which(Mail_data['Year_publication'] >= 1991 & Mail_data['Year_publication'] <= 1995 & Mail_data['Data_not_sent_motivation_code']== "1")=="YES")
+
+TOO_EFFORT_1991_1995 <-  length(which(Mail_data['Year_publication'] >= 1991 & Mail_data['Year_publication'] <= 1995 & Mail_data['Data_not_sent_motivation_code']== "2")=="YES")
+
+SKEPTICISM_1991_1995 <-  length(which(Mail_data['Year_publication'] >= 1991 & Mail_data['Year_publication'] <= 1995 & Mail_data['Data_not_sent_motivation_code']== "4")=="YES")
+
+
+NOT_FOUND_1996_2000 <-  length(which(Mail_data['Year_publication'] >= 1996 & Mail_data['Year_publication'] <= 2000 & Mail_data['Data_not_sent_motivation_code']== "1")=="YES")
+
+TOO_EFFORT_1996_2000 <-  length(which(Mail_data['Year_publication'] >= 1996 & Mail_data['Year_publication'] <= 2000 & Mail_data['Data_not_sent_motivation_code']== "2")=="YES")
+
+SKEPTICISM_1996_2000 <- 0
+
+NOT_FOUND_2001_2005 <-  length(which(Mail_data['Year_publication'] >= 2001 & Mail_data['Year_publication'] <= 2005 & Mail_data['Data_not_sent_motivation_code']== "1")=="YES")
+
+TOO_EFFORT_2001_2005 <-  length(which(Mail_data['Year_publication'] >= 2001 & Mail_data['Year_publication'] <= 2005 & Mail_data['Data_not_sent_motivation_code']== "2")=="YES")
+
+SKEPTICISM_2001_2005 <- 0
+
+NOT_FOUND_2006_2010 <-  length(which(Mail_data['Year_publication'] >= 2006 & Mail_data['Year_publication'] <= 2010 & Mail_data['Data_not_sent_motivation_code']== "1")=="YES")
+
+TOO_EFFORT_2006_2010 <-  length(which(Mail_data['Year_publication'] >= 2006 & Mail_data['Year_publication'] <= 2010 & Mail_data['Data_not_sent_motivation_code']== "2")=="YES")
+
+SKEPTICISM_2006_2010 <- 0
+
+NOT_FOUND_2011_2015 <-  length(which(Mail_data['Year_publication'] >= 2011 & Mail_data['Year_publication'] <= 2015 & Mail_data['Data_not_sent_motivation_code']== "1")=="YES")
+
+TOO_EFFORT_2011_2015 <-  length(which(Mail_data['Year_publication'] >= 2011 & Mail_data['Year_publication'] <= 2015 & Mail_data['Data_not_sent_motivation_code']== "2")=="YES")
+
+SKEPTICISM_2011_2015 <- 0
+
+
+ETHICS_2011_2015 <-  length(which(Mail_data['Year_publication'] >= 2011 & Mail_data['Year_publication'] <= 2015 & Mail_data['Data_not_sent_motivation_code']== "3")=="YES")
+
+
+NOT_FOUND_2016_2020 <-  length(which(Mail_data['Year_publication'] >= 2016 & Mail_data['Year_publication'] <= 2020 & Mail_data['Data_not_sent_motivation_code']== "1")=="YES")
+
+TOO_EFFORT_2016_2020 <-  length(which(Mail_data['Year_publication'] >= 2016 & Mail_data['Year_publication'] <= 2020 & Mail_data['Data_not_sent_motivation_code']== "2")=="YES")
+
+SKEPTICISM_2016_2020 <- 0
+
+ETHICS_1965 <- 0
+ETHICS_1966_1970 <- 0
+ETHICS_1971_1975 <- 0
+ETHICS_1976_1980 <- 0
+ETHICS_1981_1985 <- 0
+ETHICS_1986_1990 <- 0
+ETHICS_1991_1995 <- 0
+ETHICS_1996_2000 <- 0
+ETHICS_2001_2005 <- 0
+ETHICS_2006_2010 <- 0
+ETHICS_2016_2020 <- 0
+
+
+
+# Put all the stats in a dataframe and organize them
+
+
+Mail_table <- as.data.frame(matrix(nrow=12,ncol=23))
+col_names <- c("Period","Answer_yes","Answer_no","Tot_answer","Answer_yes_%","Data_provided_yes","Data_provided_no","Tot_data_provided","Data_provided_%","Mail_sent","Mail_not_found","Mail_not_found_%","Data_lost","Data_lost_%","Too_effort","Too_effort_%","Ethical_concerns","Ethical_concerns_%","Skepticism", "Skepticism_%","Data_extant","Data_extant_%","Period_2")
+
+colnames(Mail_table) <- col_names
+
+first_column <- as.data.frame(c("1960-1965","1966-1970","1971-1975","1976-1980","1981-1985","1986-1990","1991-1995","1996-2000","2001-2005","2006-2010","2011-2015","2016-2020"))
+
+second_column <- as.data.frame(as.numeric(c("1965","1970","1975","1980","1985","1990","1995","2000","2005","2010","2015","2020")))
+
+
+Mail_table[,1] <- first_column
+
+Mail_table[,2] <- c(answer_yes_1965,answer_yes_1966_1970,answer_yes_1971_1975,answer_yes_1976_1980, answer_yes_1981_1985,answer_yes_1986_1990,answer_yes_1991_1995,answer_yes_1996_2000,answer_yes_2001_2005,answer_yes_2006_2010,answer_yes_2011_2015,answer_yes_2016_2020) 
+
+Mail_table[,3] <- c(answer_no_1965,answer_no_1966_1970,answer_no_1971_1975,answer_no_1976_1980, answer_no_1981_1985,answer_no_1986_1990,answer_no_1991_1995,answer_no_1996_2000, answer_no_2001_2005,answer_no_2006_2010,answer_no_2011_2015, answer_no_2016_2020) 
+
+
+
+Mail_table[,4] <- Mail_table$Answer_yes + Mail_table$Answer_no
+
+
+
+Mail_table[,6] <- c(Data_provided_yes_1965,Data_provided_yes_1966_1970,Data_provided_yes_1971_1975,Data_provided_yes_1976_1980,Data_provided_yes_1981_1985,Data_provided_yes_1986_1990,Data_provided_yes_1991_1995,Data_provided_yes_1996_2000,Data_provided_yes_2001_2005,Data_provided_yes_2006_2010,Data_provided_yes_2011_2015,Data_provided_yes_2016_2020)
+
+Mail_table[,7] <- c(Data_provided_no_1965,Data_provided_no_1966_1970,Data_provided_no_1971_1975,Data_provided_no_1976_1980,Data_provided_no_1981_1985,Data_provided_no_1986_1990,Data_provided_no_1991_1995,Data_provided_no_1996_2000,Data_provided_no_2001_2005,Data_provided_no_2006_2010,Data_provided_no_2011_2015,Data_provided_no_2016_2020)
+
+
+Mail_table[,8] <- Mail_table$Data_provided_yes + Mail_table$Data_provided_no
+
+
+Mail_table[,10] <- c(Mail_sent_1965,Mail_sent_1966_1970,Mail_sent_1971_1975,Mail_sent_1976_1980,Mail_sent_1981_1985,Mail_sent_1986_1990,Mail_sent_1991_1995,Mail_sent_1996_2000,Mail_sent_2001_2005,Mail_sent_2006_2010,Mail_sent_2011_2015,Mail_sent_2016_2020)
+
+Mail_table[,11] <- c(Mail_not_found_1965,Mail_not_found_1966_1970,Mail_not_found_1971_1975,Mail_not_found_1976_1980,Mail_not_found_1981_1985,Mail_not_found_1986_1990,Mail_not_found_1991_1995,Mail_not_found_1996_2000,Mail_not_found_2001_2005,Mail_not_found_2006_2010,Mail_not_found_2011_2015,Mail_not_found_2016_2020)
+
+
+
+
+Mail_table[,13] <- c(NOT_FOUND_1965,NOT_FOUND_1966_1970,NOT_FOUND_1971_1975,NOT_FOUND_1976_1980,NOT_FOUND_1981_1985,NOT_FOUND_1986_1990,NOT_FOUND_1991_1995,NOT_FOUND_1996_2000,NOT_FOUND_2001_2005,NOT_FOUND_2006_2010,NOT_FOUND_2011_2015,NOT_FOUND_2016_2020)
+
+
+
+Mail_table[,15] <- c(TOO_EFFORT_1965,TOO_EFFORT_1966_1970,TOO_EFFORT_1971_1975,TOO_EFFORT_1976_1980,TOO_EFFORT_1981_1985,TOO_EFFORT_1986_1990,TOO_EFFORT_1991_1995,TOO_EFFORT_1996_2000,TOO_EFFORT_2001_2005,TOO_EFFORT_2006_2010,TOO_EFFORT_2011_2015,TOO_EFFORT_2016_2020)
+
+
+
+Mail_table[,17] <- c(ETHICS_1965,ETHICS_1966_1970,ETHICS_1971_1975,ETHICS_1976_1980,ETHICS_1981_1985,ETHICS_1986_1990,ETHICS_1991_1995,ETHICS_1996_2000,ETHICS_2001_2005,ETHICS_2006_2010,ETHICS_2011_2015,ETHICS_2016_2020)
+
+
+
+Mail_table[,19] <- c(SKEPTICISM_1965,SKEPTICISM_1966_1970,SKEPTICISM_1971_1975,SKEPTICISM_1976_1980,SKEPTICISM_1981_1985,SKEPTICISM_1986_1990,SKEPTICISM_1991_1995,SKEPTICISM_1996_2000,SKEPTICISM_2001_2005,SKEPTICISM_2006_2010,SKEPTICISM_2011_2015,SKEPTICISM_2016_2020)
+
+
+
+
+Mail_table[,21] <- (Mail_table$Too_effort+Mail_table$Ethical_concerns+Mail_table$Skepticism+Mail_table$Data_provided_yes)
+
+
+
+Mail_table[,23] <- second_column
+
+
+Mail_table <- Mail_table %>%
+  adorn_totals("row")
+
+Mail_table[,5] <- (Mail_table$Answer_yes / Mail_table$Tot_answer)*100
+
+Mail_table[,9] <- (Mail_table$Data_provided_yes / Mail_table$Tot_data_provided)*100
+
+Mail_table[,12] <- (Mail_table$Mail_not_found/(Mail_table$Mail_sent+ Mail_table$Mail_not_found))*100
+
+Mail_table[,14] <- (Mail_table$Data_lost/Mail_table$Data_provided_no)*100
+
+
+Mail_table[,16] <- (Mail_table$Too_effort/Mail_table$Data_provided_no)*100
+
+
+Mail_table[,18] <- (Mail_table$Ethical_concerns/Mail_table$Data_provided_no)*100
+
+Mail_table[,20] <- (Mail_table$Skepticism/Mail_table$Data_provided_no)*100
+
+Mail_table[,22] <- (Mail_table$Data_extant/Mail_table$Mail_sent)*100
+
+Mail_table <- Mail_table[c("Period","Mail_sent","Mail_not_found","Mail_not_found_%","Answer_yes","Answer_no","Tot_answer","Answer_yes_%","Data_provided_yes","Data_provided_no","Data_lost","Data_lost_%","Too_effort","Too_effort_%","Ethical_concerns","Ethical_concerns_%","Skepticism", "Skepticism_%","Tot_data_provided","Data_provided_%","Data_extant","Data_extant_%","Period_2")]
+
+
+
+
+print(Mail_table)
+write.table(Mail_table, file = "Mail_table.txt", sep = ",", quote = FALSE, row.names = F)
+
+
+
+
+
+```
+
+
+
+
+```{r}
+
+# Calculate decline of research data as a function of article publicatoin age using a logistic regression model
+
+
+Age_of_paper_years <- 2019 - Mail_data$Year_publication
+Mail_data[,13] <- Age_of_paper_years
+colnames(Mail_data)[colnames(Mail_data)=="V13"] <- "Age_of_paper(years)"
+
+
+Mail_data$Mail_found[Mail_data$Mail_sent == "YES"] <- 1
+Mail_data$Mail_found[Mail_data$Mail_sent == "NOT FOUND"] <- 0
+
+Mail_data$Extant_data[Mail_data$Data_not_sent_motivation_code == "2"] <- 1
+Mail_data$Extant_data[Mail_data$Data_not_sent_motivation_code == "3"] <- 1
+Mail_data$Extant_data[Mail_data$Data_not_sent_motivation_code == "4"] <- 1
+
+Mail_data$Extant_data[Mail_data$Data_sent == "YES"] <- 1
+
+
+Mail_data$Extant_data[Mail_data$Data_not_sent_motivation_code == "1"] <- 0
+
+Mail_data$Extant_data[is.na(Mail_data$Extant_data)] <- 0
+
+
+Mail_data$Answer_to_mail[Mail_data$Answer == "YES"] <- 1
+Mail_data$Answer_to_mail[Mail_data$Answer == "NO"] <- 0
+
+
+Mail_data$Data_provided[Mail_data$Data_sent == "YES"] <- 1
+Mail_data$Data_provided[Mail_data$Data_sent == "NO"] <- 0
+
+
+ # Logistic regression models and plots
+
+
+Mail_found_lm <- glm( Mail_found ~ Age_of_paper_years, Mail_data, family = "binomial")
+summary(Mail_found_lm)
+
+Mail_found_plot <- ggplot(Mail_data,aes(x=Age_of_paper_years,y=Mail_found)) + xlab("Article Age (years)")+ ylab("P(email found)") + ylim(0,1) + geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE)
+  
+  
+  
+  geom_smooth(method='lm')
+
+ ggsave(paste0("Mail_found_plot.tiff",collapse=""), plot = Mail_found_plot, dpi ="retina")
+ 
+ 
+ 
+Extant_data_lm <- glm( Extant_data ~ Age_of_paper_years, Mail_data,family = "binomial" )
+summary(Extant_data_lm)
+ 
+
+Extant_data_plot <- ggplot(Mail_data,aes(x=Age_of_paper_years,y=Extant_data))+ xlab("Article Age (years)")+ ylab("P(data extant)") + ylim(0,1) + xlim(0,40) + geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE) 
+
+
+
+ ggsave(paste0("Extant_data_plot.tiff",collapse=""), plot = Extant_data_plot, dpi ="retina")
+
+Answer_to_mail_lm <- glm( Answer_to_mail ~ Age_of_paper_years, Mail_data, family = "binomial")
+summary(Answer_to_mail_lm)
+ 
+ 
+Answer_to_mail_plot <-ggplot(Mail_data,aes(x=Age_of_paper_years,y=Answer_to_mail)) + xlab("Article Age (years)")+ ylab("P(receive email response)") + ylim(0,1) + xlim(0,45) + geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE) 
+  
+  
+
+ggsave(paste0("Answer_to_mail_plot.tiff",collapse=""), plot = Answer_to_mail_plot, dpi ="retina")
+
+  
+Data_provided_lm <- glm( Data_provided ~ Age_of_paper_years, Mail_data, family = "binomial")
+
+summary(Data_provided_lm)
+ 
+Data_provided <- ggplot(Mail_data,aes(x=Age_of_paper_years,y=Data_provided)) +
+ xlab("Article Age (years)")+ ylab("P(authors provided data)") + ylim(0,1) + xlim(0,45) + geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE) 
+  
+  
+ ggsave(paste0("Data_provided.tiff",collapse=""), plot = Data_provided, dpi ="retina")
+
+ 
+print(Mail_found_plot)
+print(Extant_data_plot)
+print(Answer_to_mail_plot)
+print(Data_provided)
+
+
+```
+

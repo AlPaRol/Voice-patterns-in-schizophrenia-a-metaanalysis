@@ -1,0 +1,841 @@
+---
+title: "Meta-Analysis of vocal patterns in schizophrenia"
+author: "RF & AP"
+date: "18 October 2018"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load data and library
+
+```{r}
+
+
+# Clean up the R environment
+
+rm(list=ls())
+
+# Load the necessary packages. If not present, it installs them.
+
+if (!require("pacman")) install.packages("pacman")
+if (!require("brmstools")) devtools::install_github("mvuorre/brmstools")
+pacman::p_load(tidyverse,metafor,Hmisc,brms,lmerTest,readxl,boot,corrr,igraph,ggraph,tidygraph,brmstools,svglite,tidybayes,stringi)
+theme_set(theme_classic())
+
+#setwd("C:/Users/albin/Dropbox/Voice in Schizophrenia - A metaanalysis/ANALISI")
+
+## Load the data
+
+MetaDataAll <- as.data.frame(read_excel("Matrix_MetaAnalysis_Diagnosis.xlsx"))
+
+# Exclude schizotypy for the main analysis
+
+MetaData <- MetaDataAll %>% subset(DIAGNOSIS == "SZ")
+
+```
+
+
+# Frequentist and meta-analyses scripts
+
+```{r}
+
+# Let's calculate standardized effect sizes, variance and standard errors
+
+DataPreprocessES <- function(d,Name="mean pitch",FeatureSz,FeatureCtrl,FeatureSDSz,FeatureSDCtrl){
+  
+  # Create ad hoc variables for the relevant acoustic features
+  
+  d$FeatureSz <- d[,FeatureSz]
+  d$FeatureCtrl <- d[,FeatureCtrl]
+  d$FeatureSDSz <- d[,FeatureSDSz]
+  d$FeatureSDCtrl <- d[,FeatureSDCtrl]
+  d$GenderMaleASD <- as.numeric(d$MALE_SZ)
+  d$GenderMaleTD <- as.numeric(d$MALE_HC)
+  
+  # Drop irrelevant variables and rename
+  
+  d = select(
+    d,
+    ID = ArticleID,
+    Year = Year_publication,
+    ASD_N =SAMPLE_SIZE_SZ,
+    TD_N = SAMPLE_SIZE_HC,
+    ASDAgeM = AGE_M_SZ,
+    ASDAgeSD = AGE_SD_SZ,
+    TDAgeM = AGE_M_HC,
+    TDAgeSD = AGE_SD_HC,
+    GenderMaleASD,
+    GenderMaleTD,
+    FeatureSz,
+    FeatureCtrl,
+    FeatureSDSz,
+    FeatureSDCtrl,
+    Population=StudyID,
+    DiagnosisDetails=DIAGNOSIS,
+    Task=TYPE_OF_TASK,
+    Authors=Article
+  )
+  
+  # Calculate standardized effect sizes
+  
+  d = escalc(
+    'SMD',
+    n1i = d$ASD_N, n2i = d$TD_N,
+    m1i = d$FeatureSz, m2i = d$FeatureCtrl,
+    sd1i = d$FeatureSDSz, sd2i = d$FeatureSDCtrl,
+    data = d
+  )
+  
+  d$StandardError=summary(d)$sei
+  d = d %>% dplyr::rename(EffectSize=yi,Variance=vi)
+  
+  return(d)
+}
+
+
+ # Function for calculating bmrs model 
+
+brmsFun<-function(formula,data,prior=FALSE,priorSpec=NULL,plot=T){
+  if (prior==FALSE){
+    m <- brm(formula, 
+             data = data, iter = 8000, chains=2, cores = 2,
+             save_mevars = T,
+             control= list(adapt_delta = 0.999,max_treedepth=20))
+  } else {
+    m <- brm(formula, 
+             data = data, iter = 8000, 
+             chains=2, 
+             cores = 2,
+             save_mevars = T,
+             prior=priorSpec,
+             sample_prior = T,
+             control= list(adapt_delta = 0.999,max_treedepth=20))
+  }
+  m <- add_ic(m,ic = "loo")
+  #print(summary(m))
+  print(pp_check(m,nsamples=200))
+  if (plot==T){
+    print(plot(m))
+  }
+  return(m)
+}
+
+
+brmFitAndSave <- function(formula,Name,d,prior=F,priorSpec=prior_ma){
+  m <- brmsFun(formula,d,prior=F,priorSpec=prior_ma,plot=F)
+  save(m, file = paste0(Name,collapse=""))
+  return(m)
+}
+
+
+# Function for reporting total number of studies and research included in the meta-analysis, total number of partcipants and median sample size for each acoustic feature meta-analyzed
+
+DataReportES <- function(d){
+  
+  d0 <- d %>% subset(complete.cases(EffectSize))
+  d1 <- d0 %>% subset(!duplicated(Population))
+  d2 <- d0 %>% subset(!duplicated(ID))
+  TotalParticipantsASD <- sum(d1$ASD_N,na.rm=T)
+  TotalParticipantsTD <- sum(d1$TD_N,na.rm=T)
+  TotalParticipants <- sum (TotalParticipantsASD,TotalParticipantsTD,na.rm=T)
+  TotalFemaleASD <- TotalParticipantsASD - sum(d1$GenderMaleASD,na.rm=T)
+  TotalFemaleTD <- TotalParticipantsTD - sum(d1$GenderMaleTD,na.rm=T)
+  TotalFemales <- sum(TotalFemaleASD,TotalFemaleTD,na.rm=T)
+  MedianParticipantsASD <- median(d1$ASD_N,na.rm=T)
+  MedianParticipantsTD <- median(d1$TD_N,na.rm=T)
+  
+  print(paste0("The meta-analysis included ", nrow(d0), " studies (", nrow(d2), " articles) for a total of ", TotalParticipantsASD, " participants with schizophrenia (", TotalFemaleASD," female ones) and ", TotalParticipantsTD, " comparison participants (",TotalFemaleTD," female ones). The median number of participants with schizophrenia was ", MedianParticipantsASD, " and that of comparison participants was ", MedianParticipantsTD,"."))
+  
+}
+
+
+# Forest plot function
+
+ggplot_Freq_Forest <- function(m=MetaforM,d){
+  
+  # add effect size to ggplot_matrix
+  
+  SumSize <- toString(m$b)
+  SumSize <- round(as.numeric(SumSize), digits =2)
+  SumSize.ci.lb <- toString(m$ci.lb)
+  SumSize.ci.lb <- round(as.numeric(SumSize.ci.lb), digits =2)
+  SumSize.ci.ub <- toString(m$ci.ub)
+  SumSize.ci.ub <- round(as.numeric(SumSize.ci.ub), digits =2)
+  SumSize_tot <- paste0(SumSize," [",SumSize.ci.lb,", ",SumSize.ci.ub,"]")
+  
+  #create new matrix for ggplot
+  
+  d <- d[,c("ID","DiagnosisDetails","Population","FeatureSz","FeatureCtrl","FeatureSDSz","FeatureSDCtrl","TD_N","ASD_N","EffectSize", "Variance","StandardError")]
+  d$DiagnosisDetails="SZ"
+  d <- d[complete.cases(d),]
+  overall.row = matrix(c("Summary", "Sum",NA,NA, NA,NA,NA,NA, NA, m$b, m$se^2,m$se), nrow = 1)
+  overall.row.df = as.data.frame (overall.row)
+  names(overall.row.df) = names(d)
+  d=rbind(as.data.frame(d), overall.row.df)
+  
+  #Make sure everything that is numeric is numeric, and everything that is a factor is a factor
+  d$EffectSize = as.numeric (d$EffectSize)
+  d$Variance = as.numeric (d$Variance)
+  d$StandardError = as.numeric(d$StandardError)
+  d$DiagnosisDetails <- relevel(as.factor(d$DiagnosisDetails),"SZ")
+  
+  #Calculate 95% CI values
+  d$lowerci = (-1.96*d$StandardError)+d$EffectSize
+  d$upperci = (1.96*d$StandardError)+d$EffectSize
+  
+  #Calculate lowest, uppest and range of CI to delimitate the plot
+  
+  lowest.ci <- min(d$lowerci)
+  uppest.ci <- max(d$upperci)
+  range_tot <- abs(lowest.ci) + abs(uppest.ci) 
+  
+  # make a plot
+  
+  for (i in unique(d$ID)){
+    d$temp[d$ID==i] <-seq(nrow(d[d$ID==i,])) 
+  }
+  d$ID1 <- with(d, paste0(ID,"_", temp))
+  p=ggplot(d, aes(y=ID1, x=EffectSize, xmin=lowerci, xmax=upperci)) + 
+    geom_point(color = 'black') +# Add data points and color them black
+    geom_point(data=subset(d, DiagnosisDetails=='Sum'), color='black', shape=18, size=6) + # add diamond for summary estimate
+    geom_errorbarh(height=.1) +# add the CI error bars
+    geom_errorbarh(data=subset(d, DiagnosisDetails=='Sum'), height=.1, size = 1) +
+    scale_x_continuous(limits=c(lowest.ci-0.3,uppest.ci+(range_tot*0.3)), name='Standardized Mean Difference (d)') +
+    ylab('Reference') + 
+    geom_vline(xintercept=0, color='black', linetype='dashed')+ # Add reference line at 0
+    facet_grid(DiagnosisDetails~., scales= 'free', space='free', margins = 'true')
+  
+  
+  # add a new line to the plot_matrix to add the annotation with the effect size 
+  ann_text <- data.frame(ID1 = 1, EffectSize = SumSize.ci.ub+0.4, lowerci = 1, upperci = 1, lab = SumSize_tot, DiagnosisDetails = factor("Sum", levels = c("SZ","Sum")))     
+  
+  # add the annotation with the effect size, justify it and add theme
+  p <- p + geom_text(data = ann_text,label = SumSize_tot, hjust=0, size=4.5, fontface="bold", color = "black") +theme_bw()+theme(strip.background = element_blank(), strip.text.y = element_blank())
+  
+  return(p)
+  
+}
+
+
+# Function for reporting meta-analysis results for each acoustic measure
+
+MetaforResultsReport<- function(m,Name){
+  
+  # Calculate CIs
+  resCI <- predict(m, digits=3)
+  resCI2 <- confint(m)
+  
+  # Print out results
+  print(paste0("The overall estimated difference (Hedges' g) in ", Name, " between the schizophrenia and healthy comparison groups was ", round(m$b[[1]],3), " (95% CI: ", round(resCI$ci.lb,3)," ", round(resCI$ci.ub,3), ", p = ", round(m$pval,3), ") with an overall variance (sigma squared) of ", round(resCI2$random[1,1],3)," (95% CI: ", round(resCI2$random[1,2],3)," ", round(resCI2$random[1,3],3),")."))
+  if (m$QEp<0.05){
+    print(paste0("The variance in effects between studies could not be reduced to random sample variability between studies (Q-stats: ", round(m$QE,3),", p = ",round(m$QEp,3),")."))
+  } else {
+    print(paste0("The variance in effects between studies could be reduced to random sample variability between studies (Q-stats: ", round(m$QE,3),", p = ",round(m$QEp,3),")."))
+  }
+}
+
+
+# Create new function for Bayesian forest plot with singles studies grouped by Task and with summary effect size for Task groups
+
+  ggplot_Combined_Forest <- function(m=MetaforM, BrmM = BrmM, BrmM_Task = BrmM_Task, d = d_plot, Name){
+
+
+ # reorder level of plot matrix 
+    
+  d$Task <- factor(d$Task,levels = c("SOCIAL","SOC","FREE","FR","CONSTR","CON","SUM")) 
+   
+ # make sure everything is numeric is numeric
+ 
+  d$Bayes_Effect_Size <- as.numeric(d$Bayes_Effect_Size)
+  d$Bayes_Lower_CI <- as.numeric(d$Bayes_Lower_CI)
+  d$Bayes_Upper_CI <- as.numeric(d$Bayes_Upper_CI)
+ 
+ # create a label variable with effect size and CI for ggplot 
+  
+ d$label <- paste0(round(d$Bayes_Effect_Size, digit = 3)," [",round(d$Bayes_Lower_CI,digit=3),", ",round(d$Bayes_Upper_CI, digit = 3),"]")
+  
+ # new line in the matrix for distinguishing studies with more than a task
+  for (i in unique(d$ID)){
+    d$temp[d$ID==i] <-seq(nrow(d[d$ID==i,])) 
+  }
+  
+  d$ID1 <- with(d, paste0(ID,"_", temp))
+  
+  
+ # Calculate lowest, uppest and range of CI to delimitate the plot
+  
+  lowest.ci <- as.numeric(min(d$Bayes_Lower_CI))
+  uppest.ci <- as.numeric(max(d$Bayes_Upper_CI))
+  range_tot <- abs(lowest.ci) + abs(uppest.ci) 
+  
+  Name_new = capitalize(Name)
+  
+  # and now the plots
+
+  
+   p_1=ggplot(d, aes(y=new_authors, x=Bayes_Effect_Size, xmin=Bayes_Lower_CI, xmax=Bayes_Upper_CI)) + 
+    geom_point(color = 'black') +# Add data points and color them black
+    geom_point(data=subset(d, DiagnosisDetails=='Sum'), color='black', shape=18, size=6) + # add diamond for summary estimate
+    geom_errorbarh(height=.1) +# add the CI error bars
+    geom_errorbarh(data=subset(d, DiagnosisDetails=='Sum'), height=.1, size = 1)+
+    scale_x_continuous(limits=c(lowest.ci-0.1,uppest.ci+(range_tot*0.15)), name='Standardized Mean Difference (d)') +
+    ylab('Reference') + 
+    geom_vline(xintercept=0, color='black', linetype='dashed')+ # Add reference line at 0
+    facet_grid(Task~., scales= 'free', space='free', margins = 'true')+
+    theme(strip.text = element_text(face="bold", size=12,lineheight=7.0))
+    
+     # plot without error bars for manual editing
+   
+   p_2=ggplot(d, aes(y=new_authors, x=Bayes_Effect_Size, xmin=Bayes_Lower_CI, xmax=Bayes_Upper_CI)) +
+    geom_point(color = 'black') +# Add data points and color them black
+    geom_point(data=subset(d, DiagnosisDetails=='Sum'), color='black', shape=18, size=6) + # add diamond for summary estimate
+    scale_x_continuous(limits=c(lowest.ci-0.1,uppest.ci+(range_tot*0.222)), name='Standardized Mean Difference (d)') +
+    ylab('Reference') + 
+    geom_vline(xintercept=0, color='black', linetype='dashed')+ # Add reference line at 0
+    facet_grid(Task~., scales= 'free', space='free', margins = 'true')+
+    theme(strip.text = element_text(face="bold", size=8,lineheight=5.0))
+  
+  
+
+  # add label to the plot with ES and CI for each line and add new theme
+
+ p_def_1 <-   p_1+geom_text(data=d, aes(label = label,  x =uppest.ci+(range_tot*0.1)),  size=5,  color = "black")+
+         theme_bw()+ 
+          theme(panel.grid.major = element_blank(), 'panel.grid.minor' = element_blank())
+ 
+
+ ggsave(paste0(Name,"Freq.png",collapse=""), plot = p_def_1, dpi ="retina",  width =32, height = 16, units = "cm")
+ 
+ 
+  p_for_editing <-   p_2+geom_text(data=d, aes(label = label,  x =uppest.ci+(range_tot*0.115)),  size=5.1,  color = "black")+
+    ggtitle(Name_new)+
+         theme_bw()+ 
+          theme(plot.title = element_text(size = 20, face = "bold", hjust = 0.5), axis.text.y = element_text(face="bold", size=16.2), strip.text = element_text(face="bold", size=10,lineheight=8.0), panel.grid.major = element_blank(), 'panel.grid.minor' = element_blank())
+  
+
+  
+   ggsave(paste0(Name,"Freq_for_editing.tiff",collapse=""), plot = p_for_editing, dpi ="retina",  width =30, height = (log(nrow(d),base = 1.5))*3, units = "cm")
+  
+return(p_def_1)
+ 
+  }
+
+ # Now the function to perform the meta-analysis 
+  
+MetaAnalysisES <- function(d,Name="mean pitch",FeatureSz,FeatureCtrl,FeatureSDSz,FeatureSDCtrl){
+  
+  d <- DataPreprocessES(d,Name,FeatureSz,FeatureCtrl,FeatureSDSz,FeatureSDCtrl)
+  d <- d %>% subset(!is.na(EffectSize))
+  
+  # create new column ("new_auhtors") in the matrix to order the studies by task (to use later for creating the Bayesian forest plot)
+  
+  new.column = as.vector(ave(d$Task, d$Task, FUN=seq_along))
+  d=cbind(as.data.frame(d), new.column)
+  d$new2 <- with(d, paste0(Task,"_", new.column))
+  d$Task <- factor(d$Task)
+  d <- d[
+  with(d, order(d$Task, d$new2)),
+  ]
+  d$IDOS <- seq.int(nrow(d))
+  d$IDOS <- sprintf("%02d", d$IDOS)
+  d$new_authors <- with(d, paste0(d$IDOS,"_", Authors))
+  
+  
+  # and now data modelling
+  
+  if (nrow(d)>1){
+    # Random Effects Model
+    # N.B. tau squared in rma.mv is called sigma squared.
+    MetaforM <- rma.mv(EffectSize, Variance, random = ~ 1 | new_authors, method = "ML", data = d, slab = ID)
+    ForestPlotF <- ggplot_Freq_Forest(MetaforM,d)
+    
+    # Test for influential factors
+    inf <- cooks.distance(MetaforM)
+    
+    plot(inf)
+    Number=sum(inf>1,na.rm=T)
+    
+    # If any such study is found identify them, report and re-run the analysis with clean data
+    if (Number>0){
+      InfName=names(inf[inf>1 & !is.na(inf)])
+      
+      remChars<-c("\\.1","\\.2","\\.3")
+      for (r in remChars){
+        InfName=gsub(r,"",InfName)
+      }
+      d2 <- d %>% subset (!(ID %in% InfName) & !is.na(EffectSize))
+      if (length(unique(d2$ID))>1){
+        InfName=paste0(InfName,collapse="; ")
+        MetaforM2 <- rma.mv(EffectSize, Variance, random = ~ 1 | ID, method = "ML", data = d2, slab = ID)
+      }
+    } else {
+      MetaforM2=NA
+      MetaforM2$pval=NA
+    }
+    
+    ### funnel plot
+    print(funnel(MetaforM, main = "Random-Effects Model",xlab = "Standardized Mean Difference"))
+    
+    #Tests for publication bias
+    Bias <- ranktest(MetaforM)
+    
+    print("Bayesian Model")
+    
+    # Bayesian reproduction of the Random Effects Models
+    prior = c(
+      prior(normal(0,0.5),class=Intercept),
+      prior(normal(0,0.5),class=sd)
+    )
+    formula_m<-bf(EffectSize | se(StandardError) ~ 1 + (1|new_authors))
+    BrmM <- brmFitAndSave(formula_m,Name,d,prior=T,priorSpec=prior)
+    
+    
+    #Frequentist forest plot
+    print(ForestPlotF)
+    ggsave(paste0(Name,"F.svg",collapse=""), plot = ForestPlotF)
+    
+    #Bayesian fores plot
+    
+     forest_bayesian <- brmstools::forest(BrmM, grouping = "new_authors", digits=3, scale = 0.7, sort = "FALSE", show_data = T)
+    print(forest_bayesian)
+    ggsave(paste0(Name,"B.tiff",collapse=""), plot = forest_bayesian,dpi ="retina",  width =30, height = 16, units = "cm")
+    
+  #If any such study is found identify them, report and re-run the Bayesian analysis with clean data
+    
+    if (Number>0){
+      BrmM2 <- brmFitAndSave(formula_m,Name,d2,prior=T,priorSpec=prior)
+    }
+    
+    DataReportES(d)
+    
+    # create a new matrix ("d_plot") to use with the Bayesian plot function
+    
+    d_plot <- d
+    
+    # select relevant variables
+    
+    d_plot <- d_plot[,c("ID","DiagnosisDetails","Authors","Population","Task","FeatureSz","FeatureCtrl","FeatureSDSz","FeatureSDCtrl","TD_N","ASD_N","EffectSize", "Variance","StandardError","new_authors")]
+    
+    # extract posterior estimates (ES and CI) for each single study and put them in the plot matrix 
+    
+    brm_estim <- as.data.frame(BrmM %>%
+    spread_draws(b_Intercept,r_new_authors["01_Alpert.et.al..(2000)",]) %>%
+    mutate(condition_mean = b_Intercept + r_new_authors) %>%
+    median_qi(condition_mean))
+    
+    colnames(brm_estim)[1] <- "new_authors"
+    brm_estim$new_authors <- gsub("\\."," ",brm_estim$new_authors)
+    brm_estim$new_authors <- gsub("et al ","et al.",brm_estim$new_authors)
+     
+  d_plot  <-   merge(d_plot ,brm_estim[,c("condition_mean",".lower",".upper","new_authors")], by = "new_authors")
+  
+  colnames(d_plot )[16] <- "Bayes_Effect_Size"
+  colnames(d_plot )[17] <- "Bayes_Lower_CI"
+  colnames(d_plot )[18] <- "Bayes_Upper_CI"
+  
+   #reorder columns of the matrix
+  
+   d_plot  <- d_plot %>%select(-1,everything())  
+   u = 15:17
+   d_plot  <- d_plot %>%select(-u,everything())  
+   
+   #create new line in plot matrix with summary effect size
+   
+  overall.row = matrix(c("Summary", "Sum","Sum",NA, "SUM",NA,NA,NA,NA,NA,NA, fixef(BrmM)[1], (fixef(BrmM)[2])^2,fixef(BrmM)[2],"Summary Total",fixef(BrmM)[1], fixef(BrmM)[3],fixef(BrmM)[4]), nrow = 1)
+  overall.row.df = as.data.frame (overall.row)
+  names(overall.row.df) = names(d_plot)
+  d_plot=rbind(as.data.frame(d_plot), overall.row.df)
+  
+  d_plot$DiagnosisDetails <- relevel(as.factor(d_plot$DiagnosisDetails),"SZ")
+  d_plot$Task = as.factor(d_plot$Task)
+  d_plot$Authors= as.factor(d_plot$Authors)
+    
+  
+    #Extract relevant estimates for the Bayesian model (BrmM) and calculate relevant stats (Q-stats, publiation bias, influential studies)
+  
+  
+    EffSize <- round(fixef(BrmM)[1],3)
+    EffCI1 <- round(fixef(BrmM)[3],3)
+    EffCI2 <- round(fixef(BrmM)[4],3)
+    EffP <- round(MetaforM$pval,3)
+    if (EffSize > 0){
+      EvidenceRatio <- round(hypothesis(BrmM, "Intercept>0")$hypothesis$Evid.Ratio, 3)
+      Credibility <- round(hypothesis(BrmM, "Intercept>0")$hypothesis$Post.Prob*100, 0)
+      } else {
+      EvidenceRatio <- round(hypothesis(BrmM, "Intercept<0")$hypothesis$Evid.Ratio, 3)
+      Credibility <- round(hypothesis(BrmM, "Intercept<0")$hypothesis$Post.Prob*100, 0)
+      }
+    Sigma2 <- round(mean(posterior_samples(BrmM, pars = "^sd_")$sd_new_authors__Intercept^2), 3)
+    Sigma2CI1 <- round(quantile(posterior_samples(BrmM, pars = "^sd_")$sd_new_authors__Intercept^2,0.025), 3)
+    Sigma2CI2 <- round(quantile(posterior_samples(BrmM, pars = "^sd_")$sd_new_authors__Intercept^2,0.975), 3)
+    
+    print(paste0("Hierarchical Bayesian meta-analysis revealed an overall estimated difference (Hedges' g) in ",Name," of ", EffSize, " (95% CI = ", EffCI1, ", ", EffCI2, ", p = ", EffP, ", evidence ratio = ", EvidenceRatio, ", credibility = ", Credibility, "%) with an overall variance between studies (sigma squared) of ", Sigma2, " (95% CI = ", Sigma2CI1, ", ", Sigma2CI2, ")."))
+    
+    if (MetaforM$QEp<0.05){
+      print(paste0("The variance in effects between studies could not be reduced to random sample variability between studies (Q-stats: ", round(MetaforM$QE,3),", p = ",round(MetaforM$QEp,3),")."))
+    } else {
+      print(paste0("The variance in effects between studies could be reduced to random sample variability between studies (Q-stats: ", round(MetaforM$QE,3),", p = ",round(MetaforM$QEp,3),")."))
+    }
+    
+    if (Number==0) {
+      print("No study was found to be influential.")
+      
+    } else {
+      
+      EffSize <- round(fixef(BrmM2)[1], 3)
+      EffCI1 <- round(fixef(BrmM2)[3], 3)
+      EffCI2 <- round(fixef(BrmM2)[4], 3)
+      EffP <- round(MetaforM$pval, 3)
+      if (EffSize > 0){
+      EvidenceRatio <- round(hypothesis(BrmM2, "Intercept>0")$hypothesis$Evid.Ratio, 3)
+      Credibility <- round(hypothesis(BrmM2, "Intercept>0")$hypothesis$Post.Prob*100, 0)
+      } else {
+      EvidenceRatio <- round(hypothesis(BrmM2, "Intercept<0")$hypothesis$Evid.Ratio, 3)
+      Credibility <- round(hypothesis(BrmM2, "Intercept<0")$hypothesis$Post.Prob*100, 0)
+      }
+      Sigma2 <- round(mean(posterior_samples(BrmM2, pars = "^sd_")$sd_new_authors__Intercept ^ 2), 3)
+      Sigma2CI1 <- round(quantile(posterior_samples(BrmM2, pars = "^sd_")$sd_new_authors__Intercept ^ 2, 0.025), 3)
+      Sigma2CI2 <- round(quantile(posterior_samples(BrmM2, pars = "^sd_")$sd_new_authors__Intercept ^ 2, 0.975), 3)
+      
+      if (Number == 1) {
+        print(
+          paste0(
+            "One study [", InfName, "] was found to be influential. Removing such study yielded an overall estimated difference of ",
+            EffSize, " (95% CI: ", EffCI1, ", ", EffCI2,", p = ",
+            EffP, ", evidence ratio = ", EvidenceRatio, ", credibility = ", Credibility, "%) with an overall variance between studies (sigma squared) of ", Sigma2, "  (95% CI = ", Sigma2CI1, ", ", Sigma2CI2, ")."))
+        
+      } else {
+        print(
+          paste0(
+            Number," studies [", InfName, "] were found to be influential. Removing such studies yielded an overall estimated difference of ",
+            EffSize," (95% CI: ", EffCI1,", ", EffCI2,", p = ",EffP, ", evidence ratio = ", EvidenceRatio, ", credibility = ", Credibility, "%) with an overall variance between studies (sigma squared) of ", Sigma2, "  (95% CI = ", Sigma2CI1, ", ", Sigma2CI2, ")."))
+      }
+    }
+    
+    if (Bias$pval>0.05){
+      print(paste0("The data did not reveal any likely publication bias (Kendall's tau = ", round(Bias$tau,3), ", p = ", round(Bias$pval,3),")."))
+    } else {
+      print(paste0("The data revealed a likely publication bias (Kendall's tau = ", round(Bias$tau,3), ", p = ", round(Bias$pval,3),")."))
+    }
+    
+    ## Now looking for effects of task
+    
+    if (length(unique(d$Task))==1){
+      print("There are no task contrasts available.")
+      BrmM_Task <- NA
+    } else if (length(unique(d$Task))>1){
+      
+      print("Testing for effects of task")
+      
+      # Frequentist analysis (for the p-values) 
+      MetaforM_Task <- rma.mv(EffectSize, Variance, random = ~ 1 + Task| ID, mods = ~ 1 + Task, method = "ML", data = d, slab = new_authors)
+      
+      # Bayesian analysis with task factor
+      
+      prior = c(
+        prior(normal(0,0.5),class=Intercept),
+        prior(normal(0,0.5),class=b),
+        prior(normal(0,0.5),class=sd)
+      )
+      formula_task<-bf(EffectSize | se(StandardError) ~ 1 + Task + (1 + Task |ID))
+      
+      BrmM_Task <- brmFitAndSave(formula_task,paste0(Name,"Task"),d,prior=T,priorSpec=prior)
+      ICs <- compare_ic(BrmM,BrmM_Task)
+      Weights <- loo_model_weights(BrmM,BrmM_Task)
+      
+      
+      forest_task <- brmstools::forest(BrmM_Task,  digits=3, scale = 0.7)
+      
+      print(forest_task)
+      
+          ggsave(paste0(Name,"B_task.tiff",collapse=""), plot = forest_task,dpi ="retina",  width =30, height = 16, units = "cm")
+          
+          
+     # Create a new model to be used only in graph editing    
+          
+    
+    # extract posterior samples from BrmM_Task to calculate relevants estimates
+     
+    post<-posterior_samples(BrmM_Task)
+    
+    if (ICs$ic_diffs__[[1]]>=0){
+      
+       formula_m_prova_2 <-bf(EffectSize  ~ (1|Task)  )
+    BrmM_prova_2 <- brmFitAndSave(formula_m_prova_2,Name,d,prior=T,priorSpec=prior)
+    
+    forest_prova <- brmstools::forest(BrmM_prova_2,  digits=3, scale = 0.7)
+    print(forest_prova)
+    ggsave(paste0(Name,"B_task_random.tiff",collapse=""), dpi= 320, plot = forest_prova)
+      
+      print(BrmM_Task)
+    
+    # update the plot matrix with  summary effect sizes and CIs for each task group 
+    
+     if ("CONSTR" %in% unique(d$Task)){ 
+         
+       
+  fixef_constrained  <- as.numeric(toString(summary(post$b_Intercept)[[4]]))
+    
+  constrained.ci.lb  <- as.numeric(toString(round(quantile(post$b_Intercept, c(0.025))[[1]], 3)))
+    
+  constrained.ci.ub <- as.numeric(toString(round(quantile(post$b_Intercept, c(0.975))[[1]], 3)))
+        
+         taskconstrained.row = matrix(c("Constrained_Sum", "Constrained_Sum","Constrained_Sum",NA, "CON",NA,NA,NA,NA,NA,NA, fixef_constrained, NA,NA,"Summary Constrained", fixef_constrained,constrained.ci.lb, constrained.ci.ub), nrow = 1)
+         
+   taskconstrained.row = as.data.frame (taskconstrained.row)
+   names(taskconstrained.row) = names(d_plot)
+   d_plot=rbind(as.data.frame(d_plot), taskconstrained.row)
+   
+      }
+        
+        if ("CONSTR" %in% unique(d$Task) & "FREE" %in% unique(d$Task)){
+          
+  fixef_free <- as.numeric(toString(round(summary(post$b_Intercept + post$b_TaskFREE)[[4]], 3)))
+  
+  free.ci.ub <-  as.numeric(toString(round(quantile(
+                post$b_Intercept + post$b_TaskFREE, c(0.975)
+              )[[1]], 3)))
+  
+  free.ci.lb <- as.numeric(toString(round(quantile(
+                post$b_Intercept + post$b_TaskFREE, c(0.025)
+              )[[1]], 3)))
+          
+  
+   taskfree.row = matrix(c("Free_Sum", "Free_Sum","Free_Sum",NA, "FR",NA,NA,NA,NA,NA,NA, fixef_free, NA,NA,"Summary Free",fixef_free,free.ci.lb, free.ci.ub), nrow = 1)
+   taskfree.row = as.data.frame (taskfree.row)
+   names(taskfree.row) = names(d_plot)
+   d_plot=rbind(as.data.frame(d_plot), taskfree.row)
+  
+          
+        }
+  
+        if ("CONSTR" %in% unique(d$Task) & "SOCIAL" %in% unique(d$Task)){
+          
+           fixef_social <- as.numeric(toString(round(summary(post$b_Intercept + post$b_TaskSOCIAL)[[4]], 3)))
+                                      
+   social.ci.lb <- as.numeric(toString(round(quantile(
+                post$b_Intercept + post$b_TaskSOCIAL, c(0.025)
+              )[[1]], 3)))
+   
+   social.ci.ub <- as.numeric(toString(round(quantile(
+                post$b_Intercept + post$b_TaskSOCIAL, c(0.975)
+              )[[1]], 3)))
+   
+   tasksocial.row = matrix(c("Social_Sum", "Social_Sum","Social_Sum",NA, "SOC",NA,NA,NA,NA,NA,NA,fixef_social,NA,NA, "Summary Social",fixef_social,social.ci.lb , social.ci.ub ), nrow = 1)
+   tasksocial.row = as.data.frame (tasksocial.row)
+   names(tasksocial.row) = names(d_plot)
+   d_plot=rbind(as.data.frame(d_plot), tasksocial.row)
+   
+        }
+        
+        if ("FREE" %in% unique(d$Task) & "SOCIAL" %in% unique(d$Task) & !("CONSTR" %in% unique(d$Task))){
+          
+    fixef_free  <- as.numeric(toString(summary(post$b_Intercept)[[4]]))
+    
+     free.ci.lb <- as.numeric(toString(round(quantile(post$b_Intercept, c(0.025))[[1]], 3)))
+    
+    free.ci.ub <- as.numeric(toString(round(quantile(post$b_Intercept, c(0.975))[[1]], 3)))
+  
+  
+           fixef_social <- as.numeric(toString(round(summary(post$b_Intercept + post$b_TaskSOCIAL)[[4]], 3)))
+                                      
+   social.ci.lb <- as.numeric(toString(round(quantile(
+                post$b_Intercept + post$b_TaskSOCIAL, c(0.025)
+              )[[1]], 3)))
+   
+   social.ci.ub <- as.numeric(toString(round(quantile(
+                post$b_Intercept + post$b_TaskSOCIAL, c(0.975)
+              )[[1]], 3)))
+   
+   
+    tasksocial.row = matrix(c("Social_Sum", "Social_Sum","Social_Sum",NA, "SOC",NA,NA,NA,NA,NA,NA,fixef_social,NA,NA, "Summary Social",fixef_social,social.ci.lb , social.ci.ub), nrow = 1)
+ 
+   tasksocial.row = as.data.frame (tasksocial.row)
+   names(tasksocial.row) = names(d_plot)
+   d_plot=rbind(as.data.frame(d_plot), tasksocial.row)
+   
+   taskfree.row = matrix(c("Free_Sum", "Free_Sum","Free_Sum",NA, "FR",NA,NA,NA,NA,NA,NA, fixef_free, NA,NA,"Summary Free",fixef_free,free.ci.lb, free.ci.ub), nrow = 1)
+   taskfree.row = as.data.frame (taskfree.row)
+   names(taskfree.row) = names(d_plot)
+   d_plot=rbind(as.data.frame(d_plot), taskfree.row)
+        
+      }
+    }
+    
+    # and now test if adding task improve the model fit and print results
+
+      if (ICs$ic_diffs__[[1]]<0){
+        print(paste0("Adding task does not improve the model (Akaike weight: ", round(Weights[[2]])*100,"%)."))
+        
+         } else {
+        print(paste0("Adding speech task to the model credibly improved it (Akaike weight: ", round(Weights[[2]])*100,"%)."))
+       
+      if ("CONSTR" %in% unique(d$Task)){ 
+         
+        print("Stats for CONSTR")
+        print(
+          paste0(
+            "Constrained monologic speech showed an effect of ",
+            round(summary(post$b_Intercept)[[4]], 3),
+            " (95% CI = ",
+            round(quantile(post$b_Intercept, c(0.025))[[1]], 3),
+            ", ",
+            round(quantile(post$b_Intercept, c(0.975))[[1]], 3),
+            ")."
+          )
+        )
+        
+      }
+        
+        if ("CONSTR" %in% unique(d$Task) & "FREE" %in% unique(d$Task)){
+          print("Stats for FREE")
+          print(
+            paste0(
+              "Free monologic speech showed an effect of ",
+              round(summary(post$b_Intercept + post$b_TaskFREE)[[4]], 3),
+              " (95% CI = ",
+              round(quantile(
+                post$b_Intercept + post$b_TaskFREE, c(0.025)
+              )[[1]], 3),
+              ", ",
+              round(quantile(
+                post$b_Intercept + post$b_TaskFREE, c(0.975)
+              )[[1]], 3),
+              ") compared to constrained monologue."
+            )
+          )
+          print(hypothesis(BrmM_Task,"TaskFREE > 0"))
+          
+ }
+  
+        if ("CONSTR" %in% unique(d$Task) & "SOCIAL" %in% unique(d$Task)){
+          print("Stats for SOCIAL")
+          print(
+            paste0(
+              "Dialogic speech showed an effect of ",
+              round(summary(post$b_Intercept + post$b_TaskSOCIAL)[[4]], 3),
+              " (95% CI = ",
+              round(quantile(
+                post$b_Intercept + post$b_TaskSOCIAL, c(0.025)
+              )[[1]], 3),
+              ", ",
+              round(quantile(
+                post$b_Intercept + post$b_TaskSOCIAL, c(0.975)
+              )[[1]], 3),
+              ") compared to constrained monologue."
+            )
+          )
+          print(hypothesis(BrmM_Task,"TaskSOCIAL > 0"))
+          
+          
+        }
+        
+        if ("FREE" %in% unique(d$Task) & "SOCIAL" %in% unique(d$Task) & !("CONSTR" %in% unique(d$Task))){
+          
+            print("Stats for FREE")
+        print(
+          paste0(
+            "Free monologic speech showed an effect of ",
+            round(summary(post$b_Intercept)[[4]], 3),
+            " (95% CI = ",
+            round(quantile(post$b_Intercept, c(0.025))[[1]], 3),
+            ", ",
+            round(quantile(post$b_Intercept, c(0.975))[[1]], 3),
+            ")."
+          )
+        )
+          
+          print("Stats for SOCIAL")
+          print(
+            paste0(
+              "Dialogic speech showed an effect of ",
+              round(summary(post$b_Intercept + post$b_TaskSOCIAL)[[4]], 3),
+              " (95% CI = ",
+              round(quantile(
+                post$b_Intercept + post$b_TaskSOCIAL, c(0.025)
+              )[[1]], 3),
+              ", ",
+              round(quantile(
+                post$b_Intercept + post$b_TaskSOCIAL, c(0.975)
+              )[[1]], 3),
+              ") compared to free monologue."
+            )
+          )
+          print(hypothesis(BrmM_Task,"TaskSOCIAL > 0"))
+          
+          
+        }
+           
+      }
+    }
+    
+    
+    MetaPrior=data.frame(Name,Mean=EffSize,SE=fixef(BrmM)[2],SD=sqrt(Sigma2))
+    
+  } else if (nrow(d)==1){
+    print("Only one study available")
+    MetaPrior=data.frame(Name,Mean=d$EffectSize,SE=d$StandardError,SD=sqrt(d$Variance))
+    
+  } else {
+    
+    MetaPrior=data.frame(Name,Mean=NA,SE=NA,SD=NA)
+    print("Not enough data points")
+  }
+  
+  plotCombined <- ggplot_Combined_Forest(MetaforM, BrmM, BrmM_Task, d_plot, Name)
+
+
+  return(MetaPrior) 
+  
+}
+```
+
+
+
+# Meta-analyses of differences by diagnosis
+
+```{r MetaAnalysis, message=FALSE, warning=FALSE}
+
+# Create a new matrix with all the acoustic features to be meta-analyzed
+
+Name <- c("duration of pauses")
+FeatureSz<- c("PA_DUR_SZ_M")
+FeatureCtrl<- c("PA_DUR_HC_M")
+FeatureSDSz<- c("PA_DUR_SZ_SD")
+FeatureSDCtrl<- c("PA_DUR__HC_SD")
+  
+Name <- c("pitch mean","pitch variability","mean intensity","intensity variability","proportion of spoken time","speech duration","speech rate","duration of pauses","number of pauses")
+FeatureSz<- c("PITCH_F0_SZ_M","PITCH_F0SD_SZ_M","INT_MEAN_SZ_M","INT_VAR_SZ_M","SP_PER_SZ_M","SP_DUR_SZ_M","SP_RAT_SZ_M","PA_DUR_SZ_M","PA_NUM_SZ_M")
+FeatureCtrl<- c("PITCH_F0_HC_M","PITCH_F0SD_HC_M","INT_MEAN_HC_M","INT_VAR_HC_M","SP_PER_HC_M","SP_DUR_HC_M","SP_RAT_HC_M","PA_DUR_HC_M","PA_NUM_HC_M")
+FeatureSDSz<- c("PITCH_F0_SZ_SD","PITCH_F0SD_SZ_SD","INT_MEAN_SZ_SD","INT_VAR_SZ_SD","SP_PER_SZ_SD","SP_DUR_SZ_SD","SP_RAT_SZ_SD","PA_DUR_SZ_SD","PA_NUM_SZ_SD")
+FeatureSDCtrl<- c("PITCH_F0_HC_SD","PITCH_F0SD_HC_SD","INT_MEAN_HC_SD","INT_VAR_HC_SD","SP_PER_HC_SD","SP_DUR_HC_SD","SP_RAT_HC_SD","PA_DUR__HC_SD","PA_NUM_HC_SD")
+
+df=data.frame(Name,FeatureSz,FeatureCtrl,FeatureSDSz,FeatureSDCtrl)
+
+df<- df %>% mutate(Name=as.character(Name),FeatureSz=as.character(FeatureSz),FeatureCtrl=as.character(FeatureCtrl),FeatureSDSz=as.character(FeatureSDSz),FeatureSDCtrl=as.character(FeatureSDCtrl))
+
+
+# Perform the meta-analyis for each acoustic measure 
+
+
+for (i in seq(nrow(df))){
+  t<-df[i,]
+  print(t$Name)
+  meta=MetaAnalysisES(d=MetaData,
+                      Name=t$Name,
+                      FeatureSz=t$FeatureSz,
+                      FeatureCtrl=t$FeatureCtrl,
+                      FeatureSDSz=t$FeatureSDSz,
+                      FeatureSDCtrl=t$FeatureSDCtrl)
+}
+
+```
+
+
+
+
